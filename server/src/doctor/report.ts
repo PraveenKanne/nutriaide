@@ -1,30 +1,32 @@
-// server/src/doctor/report.ts
-import PDFDocument from 'pdfkit';
+import { Router, Request, Response } from 'express';
+import { z } from 'zod';
+import crypto from 'crypto';
 import { prisma } from '../index';
+import { verify } from '../auth/service';
+import { generateReport } from './report';
 
-export async function generateReport(userId: string, from: Date, to: Date): Promise<Buffer> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  const meals = await prisma.mealLog.findMany({ where: { userId, timestamp: { gte: from, lte: to } }, include: { food: true } });
-  const meds = await prisma.medication.findMany({ where: { userId }, include: { intakes: true } });
-  const vitals = await prisma.vital.findMany({ where: { userId, measuredAt: { gte: from, lte: to } } });
+const r = Router();
 
-  const doc = new PDFDocument({ margin: 40 });
-  const buffers: Buffer[] = [];
-  doc.on('data', buffers.push.bind(buffers));
-  doc.on('end', () => {});
-
-  doc.fontSize(18).text('Nutrition & Health Report', { underline: true });
-  doc.moveDown().fontSize(12).text(`Patient: ${user?.name || user?.email}`);
-  doc.text(`Period: ${from.toDateString()} - ${to.toDateString()}`);
-  doc.moveDown().fontSize(14).text('Meal Summary');
-  meals.slice(0, 200).forEach(m => {
-    doc.fontSize(10).text(`${m.timestamp.toISOString()} — ${m.mealType} — ${m.food.name} — ${m.grams ?? m.servings ?? ''}`);
-  });
-  doc.moveDown().fontSize(14).text('Medications');
-  meds.forEach(m => doc.fontSize(10).text(`${m.name} ${m.dose}${m.unit} ${m.route}`));
-  doc.moveDown().fontSize(14).text('Vitals');
-  vitals.forEach(v => doc.fontSize(10).text(`${v.measuredAt.toISOString()} — ${v.type}: ${v.value} ${v.unit}`));
-
-  doc.end();
-  return await new Promise<Buffer>(resolve => doc.on('end', () => resolve(Buffer.concat(buffers))));
+function hashToken(t: string) {
+  return crypto.createHash('sha256').update(t).digest('hex');
 }
+
+// Create share link
+r.post('/share', async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) throw new Error('Missing token');
+
+    const userId = verify(token);
+    const body = z.object({
+      doctorName: z.string().optional(),
+      doctorContact: z.string().optional(),
+      scopes: z.array(z.string()),
+      days: z.number().default(30)
+    }).parse(req.body);
+
+    const shareToken = crypto.randomBytes(24).toString('hex');
+    const grant = await prisma.shareGrant.create({
+      data: {
+        userId,
+        scopes: body.sc

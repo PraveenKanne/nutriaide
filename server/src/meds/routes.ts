@@ -1,42 +1,75 @@
-// server/src/meds/routes.ts
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../index';
 import { verify } from '../auth/service';
 
 const r = Router();
 
-r.post('/', async (req, res) => {
+// Add medication
+r.post('/', async (req: Request, res: Response) => {
   try {
-    const userId = verify(req.headers.authorization?.replace('Bearer ', '')!);
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) throw new Error('Missing token');
+
+    const userId = verify(token);
     const body = z.object({
-      name: z.string(), dose: z.number(), unit: z.string(),
-      route: z.string(), schedule: z.any(), start: z.string(), end: z.string().optional(), prescriber: z.string().optional()
+      name: z.string(),
+      dose: z.number(),
+      unit: z.string(),
+      route: z.string(),
+      schedule: z.any(),
+      start: z.string(),
+      end: z.string().optional(),
+      prescriber: z.string().optional()
     }).parse(req.body);
+
     const med = await prisma.medication.create({
       data: { userId, ...body, start: new Date(body.start), end: body.end ? new Date(body.end) : null }
     });
     res.json(med);
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
-r.post('/intake', async (req, res) => {
+// Log medication intake
+r.post('/intake', async (req: Request, res: Response) => {
   try {
-    const userId = verify(req.headers.authorization?.replace('Bearer ', '')!);
-    const body = z.object({ medicationId: z.string(), takenAt: z.string(), dose: z.number().optional(), missedReason: z.string().optional() }).parse(req.body);
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) throw new Error('Missing token');
+
+    const userId = verify(token);
+    const body = z.object({
+      medicationId: z.string(),
+      takenAt: z.string(),
+      dose: z.number().optional(),
+      missedReason: z.string().optional()
+    }).parse(req.body);
+
     const med = await prisma.medication.findFirst({ where: { id: body.medicationId, userId } });
     if (!med) return res.status(404).json({ error: 'Medication not found' });
-    const rec = await prisma.medicationIntake.create({ data: { medicationId: med.id, takenAt: new Date(body.takenAt), dose: body.dose, missedReason: body.missedReason } });
+
+    const rec = await prisma.medicationIntake.create({
+      data: { medicationId: med.id, takenAt: new Date(body.takenAt), dose: body.dose, missedReason: body.missedReason }
+    });
     res.json(rec);
-  } catch (e: any) { res.status(400).json({ error: e.message }); }
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
-r.get('/', async (req, res) => {
+// Get medications
+r.get('/', async (req: Request, res: Response) => {
   try {
-    const userId = verify(req.headers.authorization?.replace('Bearer ', '')!);
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) throw new Error('Missing token');
+
+    const userId = verify(token);
     const meds = await prisma.medication.findMany({ where: { userId }, include: { intakes: true } });
     res.json({ meds });
-  } catch (e: any) { res.status(401).json({ error: 'Unauthorized' }); }
+  } catch (e: any) {
+    res.status(401).json({ error: e.message });
+  }
 });
 
 export default r;
