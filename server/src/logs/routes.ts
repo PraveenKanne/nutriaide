@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../index';
-import { verify } from '../auth/service';
+import { verify } from '../auth/service.js';
 
 const r = Router();
 

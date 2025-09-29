@@ -1,6 +1,5 @@
 // server/src/food/service.ts
 import fetch from 'node-fetch';
-import type { FoodItem } from '@prisma/client';
 import { prisma } from '../index';
 
 type OFFProduct = {
@@ -10,7 +9,13 @@ type OFFProduct = {
     categories?: string;
     nutriscore_grade?: string;
     ingredients_text?: string;
-    ingredients?: { id?: string; text?: string; vegan?: string; vegetarian?: string; percent_estimate?: number }[];
+    ingredients?: {
+      id?: string;
+      text?: string;
+      vegan?: string;
+      vegetarian?: string;
+      percent_estimate?: number;
+    }[];
     allergens_tags?: string[];
     additives_tags?: string[];
     nutriments?: Record<string, any>;
@@ -23,47 +28,72 @@ export async function getOrCreateByBarcode(code: string) {
   if (existing) return existing;
 
   const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json`);
+  if (!resp.ok) throw new Error(`Open Food Facts error: ${resp.status}`);
   const data = (await resp.json()) as OFFProduct;
 
   if (!data.product) throw new Error('Not found in Open Food Facts');
 
   const p = data.product;
-  const name = p.product_name || 'Unknown';
-  const brand = p.brands?.split(',')[0]?.trim();
-  const ingredients = p.ingredients?.map(i => i.text?.trim()).filter(Boolean) ?? parseIngredients(p.ingredients_text);
-  const additives = (p.additives_tags ?? []).map(a => a.replace('en:', '').toUpperCase());
-  const allergens = (p.allergens_tags ?? []).map(a => a.replace('en:', ''));
-  const nutrients = extractNutrients(p.nutriments);
-  const processingLevel = p.nutriscore_grade ? `nutriscore:${p.nutriscore_grade.toUpperCase()}` : undefined;
+  const name = (p.product_name || 'Unknown').trim();
+  const brand = p.brands?.split(',')[0]?.trim() || undefined;
 
-  const shelfLife = estimateShelfLife(name, brand, ingredients);
+  // Normalize ingredients
+  const ingredientsArr: string[] = Array.isArray(p.ingredients)
+    ? p.ingredients
+        .map(i => (i?.text || '').trim())
+        .filter(Boolean)
+    : parseIngredients(p.ingredients_text);
 
+  // Normalize additives and allergens
+  const additivesArr: string[] = Array.isArray(p.additives_tags)
+    ? p.additives_tags.map(a => a.replace(/^en:/, '').toUpperCase())
+    : [];
+
+  const allergensArr: string[] = Array.isArray(p.allergens_tags)
+    ? p.allergens_tags.map(a => a.replace(/^en:/, '').toLowerCase())
+    : [];
+
+  const nutrients = extractNutrients(p.nutriments || {});
+  const processingLevel =
+    p.nutriscore_grade ? `nutriscore:${p.nutriscore_grade.toUpperCase()}` : undefined;
+
+  const shelfLife = estimateShelfLife(name, brand, ingredientsArr);
+
+  // IMPORTANT: Use { set: [...] } for list fields to satisfy Prisma types
   const item = await prisma.foodItem.create({
     data: {
       barcode: code,
       name,
       brand,
-      category: p.categories?.split(',')?.[0]?.trim(),
+      category: p.categories?.split(',')?.[0]?.trim() || undefined,
       servingUnit: 'g',
       servingValue: 100,
-      nutrients,
-      ingredients,
-      additives,
-      allergens,
-      shelfLife,
-      processingLevel
-    }
+      nutrients, // JSON
+      ingredients: { set: ingredientsArr }, // list field
+      additives: { set: additivesArr },     // list field
+      allergens: { set: allergensArr },     // list field
+      shelfLife, // JSON
+      processingLevel,
+    },
   });
+
   return item;
 }
 
-function parseIngredients(text?: string) {
+function parseIngredients(text?: string): string[] {
   if (!text) return [];
-  return text.split(/[.,;\n]/).map(s => s.trim()).filter(Boolean);
+  return text
+    .split(/[.,;\n]/)
+    .map(s => s.trim())
+    .filter(Boolean);
 }
 
-function extractNutrients(n: Record<string, any> = {}) {
-  const pick = (k: string) => Number(n[k]) || undefined;
+function extractNutrients(n: Record<string, any>) {
+  const pick = (k: string) => {
+    const v = n[k];
+    const num = typeof v === 'string' ? Number(v) : v;
+    return Number.isFinite(num) ? Number(num) : undefined;
+  };
   return {
     energy: pick('energy-kcal_100g') ?? pick('energy_100g'),
     protein: pick('proteins_100g'),
@@ -72,7 +102,13 @@ function extractNutrients(n: Record<string, any> = {}) {
     carbs: pick('carbohydrates_100g'),
     sugar: pick('sugars_100g'),
     fiber: pick('fiber_100g'),
-    sodium: pick('sodium_100g') ?? (n['salt_100g'] ? Number(n['salt_100g']) * 400 : undefined)
+    // sodium in g → mg (if salt given, convert to sodium ≈ 0.4)
+    sodium:
+      pick('sodium_100g') !== undefined
+        ? pick('sodium_100g')! * 1000 // g → mg
+        : pick('salt_100g') !== undefined
+        ? pick('salt_100g')! * 1000 * 0.4 // salt g → sodium mg
+        : undefined,
   };
 }
 
@@ -91,8 +127,9 @@ function estimateShelfLife(name?: string, brand?: string, ingredients: string[] 
     : { unopened: '3–7 days', opened: '1–3 days', storage: 'Refrigerate airtight' };
 }
 
-export function evaluateProsCons(f: FoodItem) {
-  const n = f.nutrients as any;
+// Pros/cons and cuisine ideas kept as before — export if you use them in routes
+export function evaluateProsCons(f: { nutrients: any; additives?: string[] }) {
+  const n = f.nutrients || {};
   const pros: string[] = [];
   const cons: string[] = [];
   if (n.fiber && n.fiber >= 3) pros.push('Good source of fiber');
@@ -103,12 +140,15 @@ export function evaluateProsCons(f: FoodItem) {
   return { pros, cons };
 }
 
-export function cuisineIdeas(f: FoodItem, prefs: { cuisines: string[]; allergies: string[] }) {
+export function cuisineIdeas(
+  f: { allergens?: string[] },
+  prefs: { cuisines: string[]; allergies: string[] }
+) {
   const ideas = [
     { cuisine: 'Indian', prep: 'Tandoor/grill with yogurt-spice marinade', swap: 'Use hung curd instead of cream' },
     { cuisine: 'Mediterranean', prep: 'Bake with olive oil, herbs, lemon', swap: 'Choose whole grains' },
     { cuisine: 'East Asian', prep: 'Steam or stir-fry with minimal oil', swap: 'Low-sodium soy/tamari' },
-    { cuisine: 'Latin American', prep: 'Grilled with salsa/beans/brown rice', swap: 'Corn or whole-wheat tortillas' }
+    { cuisine: 'Latin American', prep: 'Grilled with salsa/beans/brown rice', swap: 'Corn or whole-wheat tortillas' },
   ];
   const allergens = (f.allergens || []).map(a => a.toLowerCase());
   return ideas.filter(() => true).filter(i => !prefs.allergies.some(a => allergens.includes(a.toLowerCase())));

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../index';
 import { getOrCreateByBarcode, evaluateProsCons, cuisineIdeas } from './service';
-import { verify } from '../auth/service';
+import { verify } from '../auth/service.js';
 
 const r = Router();
 

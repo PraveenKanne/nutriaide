@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@prisma/client": "^5.17.0",
-    "bcryptjs": "^2.4.3",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -30,6 +30,7 @@
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
+    "@types/pdfkit": "^0.17.3",
     "prisma": "^5.17.0",
     "ts-node": "^10.9.2",
     "tslib": "^2.6.3",

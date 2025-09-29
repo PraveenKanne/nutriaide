@@ -3,8 +3,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { prisma } from '../index';
-import { verify } from '../auth/service';
-import { generateReport } from './report';
+import { verify } from '../auth/service.js';
+import { generateReport }  from './report';
 
 const r = Router();
 

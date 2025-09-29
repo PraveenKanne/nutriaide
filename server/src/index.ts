@@ -4,12 +4,12 @@ import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
 import { PrismaClient } from '@prisma/client';
-import authRoutes from './auth/routes';
-import foodRoutes from './food/routes';
-import logRoutes from './logs/routes';
-import medsRoutes from './meds/routes';
-import doctorRoutes from './doctor/routes';
-import ocrRoutes from './ocr/routes';
+import authRoutes from './auth/routes.js';
+import foodRoutes from './food/routes.js';
+import logRoutes from './logs/routes.js';
+import medsRoutes from './meds/routes.js';
+import doctorRoutes from './doctor/routes.js';
+import ocrRoutes from './ocr/routes.js';
 
 export const prisma = new PrismaClient();
 const app = express();
